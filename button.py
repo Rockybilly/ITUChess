@@ -13,13 +13,10 @@ class Button(object):
     button.
     """
 
-    def __init__(self, program_state, pos, text_font, font_size, text_color, text_padding, message, color, hover_color, handler, *args):
+    def __init__(self, pos, text_font, font_size, text_color, text_padding, message, color, hover_color, handler, *args):
 
         
-        
-
         self.pos = pos # The top left corner of the rectangle
-        self.program_state = program_state
 
         # Assign text position using the padding size given.
         self.text_pos = pos[0] + text_padding, pos[1] + text_padding

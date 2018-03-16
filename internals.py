@@ -1,8 +1,7 @@
-import sys
 import copy
 from collections import defaultdict
 import engine
-
+import threading
 
 class Piece(object):
     """
@@ -22,6 +21,7 @@ class Piece(object):
         # (from_tile, played_turn_num)
         self.last_move = None
 
+
 class Board(object):
     """
     The class for the chessboard.
@@ -32,7 +32,7 @@ class Board(object):
         self.debug = debug
         self.debug_output("Board object created with the debug level {0}.".format(self.debug), 1)
 
-        self.grid = [[0] * 8 for i in range(8)] # Empty Board
+        self.grid = [[None] * 8 for _ in range(8)]  # Empty Board
 
         # A square is marked after a pawn moves double,
         # marked square is the one behind the moved pawn.
@@ -50,7 +50,7 @@ class Board(object):
             Piece("white", "rook")
         ]
 
-        for i in xrange(8):
+        for i in range(8):
             self.white_pieces.append(Piece("white", "pawn"))
 
         self.black_pieces = [
@@ -64,17 +64,17 @@ class Board(object):
             Piece("black", "rook")
         ]
 
-        for i in xrange(8):
+        for i in range(8):
             self.black_pieces.append(Piece("black", "pawn"))
 
         # Filling the board with pieces.
         for col, piece in enumerate(self.white_pieces[:8]):
             self.grid[7][col] = piece
-            self.grid[6][col] = self.white_pieces[col + 8] # pawns
+            self.grid[6][col] = self.white_pieces[col + 8]  # pawns
 
         for col, piece in enumerate(self.black_pieces[:8]):
             self.grid[0][col] = piece
-            self.grid[1][col] = self.black_pieces[col + 8] # pawns"
+            self.grid[1][col] = self.black_pieces[col + 8]  # pawns
 
     def get_moves(self, pos):
         """
@@ -91,14 +91,13 @@ class Board(object):
 
         # Directions packed in lists
         # For the search function
-        # Each direction (x, y):
-        #  x = -1 means piece goes up, x = 1 means piece goes down, x = 0 means row is constant.
-        #  y = -1 means piece goes left, y = 1 means piece goes right, y = 0 means col is constant.
+        # Each direction (y, x):
+        #  y = -1 means piece goes up, y = 1 means piece goes down, y = 0 means row is constant.
+        #  x = -1 means piece goes left, x = 1 means piece goes right, x = 0 means col is constant.
 
         bishop_move = [(-1, -1), (-1, 1), (1, 1), (1, -1)]
         rook_move = [(-1, 0), (0, 1), (1, 0), (0, -1)]
         queen_move = bishop_move + rook_move
-
 
         if piece.kind == "king":
             # The king moves like the queen, except the search length is 1.
@@ -166,27 +165,8 @@ class Board(object):
                 else:
                     moves = self.direction_search(pos, [(-1, 0)], 1)
 
-                    if self.en_passant_square and self.en_passant_square in [(row - 1, col - 1), (row - 1, col + 1)]:
+                    if self.en_passant_square in [(row - 1, col - 1), (row - 1, col + 1)]:
                         moves.add(self.en_passant_square)
-
-                    """
-                    if col > 0 and row == 3:
-                        # The piece left of the pawn
-                        adjacent = self.grid[row][col - 1]
-                        
-                        # If a piece exists in the adjacent tile
-                        if adjacent:
-                            # If it is a pawn and it's last move was first 2-tile opening and it was one turn ago
-                            if adjacent.kind == "pawn" and adjacent.last_move == ((1, col - 1), turn_num - 1):
-                                # Then add en passant move
-                                moves.add((row - 1, col - 1))
-
-                    if col < 7 and row == 3:
-                        adjacent = self.grid[row][col + 1]
-                        if adjacent:
-                            if adjacent.kind == "pawn" and adjacent.last_move == ((1, col + 1), turn_num - 1):
-                                moves.add((row - 1, col + 1))
-                    """
 
             elif piece.color == "black":
                 if row == 1:
@@ -195,24 +175,8 @@ class Board(object):
                 else:
                     moves = self.direction_search(pos, [(1, 0)], 1)
                     
-                    if self.en_passant_square and self.en_passant_square in [(row + 1, col - 1), (row + 1, col - 1)]:
+                    if self.en_passant_square in [(row + 1, col - 1), (row + 1, col - 1)]:
                         moves.add(self.en_passant_square)
-
-                    """
-                    if col > 0 and row == 4:
-                        # The piece left of the pawn
-                        adjacent = self.grid[row][col - 1]
-                        # If it is a pawn and it's last move was first 2-tile opening and it was one turn ago
-                        if adjacent:
-                            if adjacent.kind == "pawn" and adjacent.last_move == ((6, col - 1), turn_num):
-                                moves.add((row + 1, col - 1))
-
-                    if col < 7 and row == 4:
-                        adjacent = self.grid[row][col + 1]
-                        if adjacent:
-                            if adjacent.kind == "pawn" and adjacent.last_move == ((6, col + 1), turn_num):
-                                moves.add((row + 1, col + 1))
-                    """
 
         # Add attacked tiles with opponent pieces inside to legal moves.
         for tile in self.get_attacks(pos):
@@ -243,8 +207,8 @@ class Board(object):
         moves = defaultdict(list)
 
         for i, row in enumerate(self.grid):
-            for j, tile in enumerate(row):
-                if tile and tile.color == color:
+            for j, piece in enumerate(row):
+                if piece and piece.color == color:
                     for move in self.get_moves((i, j)):
                         moves[(i, j)].append(move)
 
@@ -373,14 +337,16 @@ class Board(object):
 
         from_tile, to_tile = move
 
-        board_copy.make_move(from_tile, to_tile, "pawn")
+        # promote=pawn is used for representing a pseudo-promote move,
+        # when only assuming and testing.
+        board_copy.make_move(from_tile, to_tile, promote="pawn")
 
         if board_copy.king_under_attack(color):
             return False # King is still under attack after the move.
         else:
             return True # The move helps the given king out of check.
 
-    def make_move(self, from_tile, to_tile, promote=None):
+    def make_move(self, from_tile, to_tile, promote="pawn"):
         """
         The method that handles piece alterations to apply a move.
         """
@@ -401,7 +367,7 @@ class Board(object):
         if piece.kind == "king":
             # Queenside
             if fc - tc == 2:
-                self.debug_output("Castled Queenside.")
+                self.debug_output("Castled Queenside.", 3)
                 castle = self.grid[fr][0]
                 self.grid[fr][0] = 0
                 self.grid[fr][fc] = 0
@@ -409,7 +375,7 @@ class Board(object):
                 self.grid[fr][3] = castle       
             # Kingside
             elif tc - fc == 2:
-                self.debug_output("Castled Kingside.")
+                self.debug_output("Castled Kingside.", 3)
                 castle = self.grid[fr][7]
                 self.grid[fr][7] = 0
                 self.grid[fr][fc] = 0
@@ -435,6 +401,7 @@ class Board(object):
                     self.debug_output("White pawn at {0} made promotion to {1}, became a {2}".format(from_tile, to_tile, promote), 3)
                     self.grid[fr][fc] = 0
                     self.grid[tr][tc] = Piece("white", promote)
+                # If move is double pawn start
                 elif fr == 6 and tr == 4:
                     self.debug_output("White pawn at {0} made double move to {1}, the next en_passant square is {2}".format(from_tile, to_tile, (tr + 1, tc)), 3)
                     self.grid[fr][fc] = 0
@@ -459,6 +426,7 @@ class Board(object):
                     self.debug_output("Black pawn at {0} made promotion to {1}, became a {2}".format(from_tile, to_tile, promote), 3)
                     self.grid[fr][fc] = 0
                     self.grid[tr][tc] = Piece("black", promote)
+                # If move is double pawn start
                 elif fr == 1 and tr == 3:
                     self.debug_output("Black pawn at {0} made double move to {1}, the next en_passant square is {2}".format(from_tile, to_tile, (tr - 1, tc)), 3)
                     self.grid[fr][fc] = 0
@@ -560,15 +528,15 @@ class Board(object):
         for row in self.grid:
             for piece in row:
                 if piece:
-                    print (piece.color + " " + piece.kind).center(12),
+                    print((piece.color + " " + piece.kind).center(12), end=' ')
                 else:
-                    print "0".center(12),
-            print "\n"
-        print "\n" + 12 * 8 * "-" + "\n"
+                    print("0".center(12), end=' ')
+            print("\n")
+        print("\n" + 12 * 8 * "-" + "\n")
 
     def debug_output(self, message, debug_level):
         if debug_level <= self.debug:
-            print "[BOARD] " + message
+            print("[BOARD] " + message)
 
     @staticmethod
     def pos_to_square(pos):
@@ -586,36 +554,33 @@ class Board(object):
         pos = (7 - "12345678".index(square[1]), "abcdefgh".index(square[0]))
         return pos
 
+    @staticmethod
+    def piece_to_letter(piece):
+        letter = piece.kind[0] if piece.kind != "knight" else "n"
+        if piece.color == "white":
+            letter = letter.upper()
+        return letter
+
     def produce_fen_position(self):
 
         position = ""
 
-        # Preparing position part of  the fen.
+        # Preparing position part of the fen.
         for row in self.grid:
             empties = 0
-            for tile in row:
-                if tile:
-                    if tile.kind == "pawn":
-                        letter = "P" if tile.color == "white" else "p"
-                    elif tile.kind == "king":
-                        letter = "K" if tile.color == "white" else "k" 
-                    elif tile.kind == "queen":
-                        letter = "Q" if tile.color == "white" else "q" 
-                    elif tile.kind == "knight":
-                        letter = "N" if tile.color == "white" else "n" 
-                    elif tile.kind == "bishop":
-                        letter = "B" if tile.color == "white" else "b" 
-                    elif tile.kind == "rook":
-                        letter = "R" if tile.color == "white" else "r"
+            for piece in row:
+                if piece:
 
                     if empties: position += str(empties)
-                    position += letter
+                    position += Board.piece_to_letter(piece)
                     empties = 0
 
                 else:
                     empties += 1
 
-            if empties: position += str(empties)
+            if empties:
+                position += str(empties)
+
             position += "/"
             empties = 0
 
@@ -645,34 +610,59 @@ class Board(object):
       
         return castling
 
+
 class Game(object):
 
-    def __init__(self):
+    def __init__(self, debug, game_mode):
 
-        self.board = Board(5)
+        self.board = Board(debug)
+
+        self.game_mode = game_mode
+
+        self.chess_engine = engine.Engine()
+        self.search_thread_running = False
+
         self.turn = "white"
         self.move_count = 1
 
-        self.chess_engine = engine.Engine()
         self.all_moves = []
 
         self.selected = None
         self.selected_moves = []
 
         self.best_move = None
+        self.best_move_string = ""
 
+        self.player_points = {
+            "white": 1,
+            "black": -1
+        } 
     def move(self, from_tile, to_tile):
 
-        self.board.make_move(from_tile, to_tile)
-        self.all_moves.append(self.board.pos_to_square(from_tile) + self.board.pos_to_square(to_tile))
-        self.chess_engine.next_position(self.all_moves)
-        
-        if self.turn == "white": self.set_best_move()
-        else: self.best_move = None
 
+        self.board.make_move(from_tile, to_tile)
+        self.all_moves.append(Board.pos_to_square(from_tile) + Board.pos_to_square(to_tile))
         self.turn = "white" if self.turn == "black" else "black"
 
-        #print self.chess_engine.print_board()
+        self.chess_engine.set_position(self.all_moves)
+        
+        if self.game_mode == "ai":
+            
+
+            move = self.chess_engine.get_best_move()
+
+            from_square, to_square = move[:2], move[2:]
+            from_pos, to_pos = Board.square_to_pos(from_square), Board.square_to_pos(to_square)
+
+            if self.board.grid[from_pos[0]][from_pos[1]].color != self.turn:
+                print ("Engine tried an illegal move.")
+
+            self.board.make_move(from_pos, to_pos)
+            self.all_moves.append(Board.pos_to_square(from_pos) + Board.pos_to_square(to_pos))
+            self.turn = "white" if self.turn == "black" else "black"
+
+            self.chess_engine.set_position(self.all_moves)
+
 
     def set_selection(self, pos):
         """
@@ -688,14 +678,42 @@ class Game(object):
         self.selected_moves = []
 
     def set_best_move(self):
-        move = self.chess_engine.get_best_move(40)
+        move = self.chess_engine.get_best_move()
+
         from_square, to_square = move[:2], move[2:]
         from_pos, to_pos = self.board.square_to_pos(from_square), self.board.square_to_pos(to_square)
 
-        self.best_move = from_pos, to_pos
+        self.move(from_pos, to_pos)
+        #self.best_move = from_pos, to_pos
+
+    def search_best_move(self):
+        self.search_thread_running = True
+        self.search_thread = threading.Thread(target=self._search_best_move)
+        self.search_thread.daemon = True
+        self.search_thread.start()
+
+    def _search_best_move(self):
+
+        info_values = self.chess_engine.start_infinite_search()
+        for info in info_values:
+            if "pv" in info:
+                self.best_move = Board.square_to_pos(info["pv"][0][:2]), Board.square_to_pos(info["pv"][0][2:4])
+
+                self.best_move_string= str(info["pv"][0]) + " " + "%+.3f" % (self.player_points[self.turn] * info["score"]["cp"] / 100) + "(Depth " + str(info["depth"]) + ")" 
+        #print("Analysis is ended.")
+        self.best_move = None
+        self.best_move_string = ""
+
+    def stop_search(self):
+        self.search_thread_running = False
+        self.chess_engine.stop_infinite_search()
+    
+    def game_exit(self):
+        self.search_thread_running = False
+        self.chess_engine.stop_process()
 
     def produce_fen(self):
         pass
 
 if __name__ == "__main__":
-    b = Board(True)
+    b = Board(1)
